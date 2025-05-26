@@ -230,6 +230,7 @@ if (typeof app.beginUndoGroup !== "function") {
 
     var cancelBtn = btnGroup.add("button", undefined, "Cancel");
     var okBtn = btnGroup.add("button", undefined, "OK");
+    var convertBtn = btnGroup.add("button", undefined, "Convert to Strokes");
     
     // Add help button
     var helpBtn = btnGroup.add("button", undefined, "Help");
@@ -261,6 +262,7 @@ if (typeof app.beginUndoGroup !== "function") {
 
     cancelBtn.onClick = function() { handleCancel(); };
     okBtn.onClick     = function() { handleOk(); };
+    convertBtn.onClick = function() { handleConvertToStrokes(); };
 
     // Show the dialog
     dialog.center();
@@ -335,6 +337,72 @@ if (typeof app.beginUndoGroup !== "function") {
             isUndo = false;
         }
         dialog.close();
+    }
+
+    function handleConvertToStrokes() {
+        // Confirm with the user
+        if (!confirm("This will convert guides on the 'Gridder_Guides' layer to editable strokes. This action cannot be directly undone with the script's preview. Proceed?")) {
+            return;
+        }
+
+        try {
+            app.beginUndoGroup("Convert Guides to Strokes");
+            var layer = getOrCreateLayer("Gridder_Guides");
+
+            if (applyAllCheck.value) {
+                // If "Apply to all artboards" is checked, iterate through all artboards
+                for (var i = 0; i < doc.artboards.length; i++) {
+                    convertGuidesOnArtboardToStrokes(doc.artboards[i], layer);
+                }
+            } else {
+                // Otherwise, only convert for the active artboard
+                var activeAB = doc.artboards[doc.artboards.getActiveArtboardIndex()];
+                convertGuidesOnArtboardToStrokes(activeAB, layer);
+            }
+
+            app.endUndoGroup();
+            alert("Guides converted to strokes on the 'Gridder_Guides' layer.");
+        } catch (e) {
+            app.endUndoGroup(); // Ensure undo group is ended in case of error
+            alert("Error converting guides to strokes: " + e + "\nLine: " + (e.line || "unknown"));
+        }
+        // Note: We don't close the dialog here, user might want to do other operations.
+    }
+
+    function convertGuidesOnArtboardToStrokes(artboard, layer) {
+        var itemsToConvert = [];
+        // Iterate through pathItems on the layer
+        for (var j = 0; j < layer.pathItems.length; j++) {
+            var item = layer.pathItems[j];
+            // Check if the item is a guide and if it's within the artboard bounds
+            if (item.guides && isItemOnArtboard(item, artboard)) {
+                itemsToConvert.push(item);
+            }
+        }
+
+        for (var k = 0; k < itemsToConvert.length; k++) {
+            var guideItem = itemsToConvert[k];
+            guideItem.guides = false; // Convert from guide to regular path
+            guideItem.filled = false; // No fill
+            guideItem.stroked = true; // Has a stroke
+            guideItem.strokeWidth = 1; // Default stroke width 1pt
+            guideItem.strokeColor = new RGBColor(); // Default black stroke
+            // guideItem.selected = true; // Optionally select the new strokes
+        }
+    }
+
+    // Helper function to check if an item is visually on an artboard
+    // This is a basic check and might need refinement for complex shapes
+    function isItemOnArtboard(item, artboard) {
+        var itemBounds = item.geometricBounds; // [left, top, right, bottom]
+        var artboardBounds = artboard.artboardRect;
+
+        // Check for overlap (simple bounding box check)
+        var overlaps = !(itemBounds[2] < artboardBounds[0] || // item is to the left of artboard
+                         itemBounds[0] > artboardBounds[2] || // item is to the right of artboard
+                         itemBounds[1] < artboardBounds[3] || // item is below artboard (top < bottom due to coordinate system)
+                         itemBounds[3] > artboardBounds[1]);  // item is above artboard (bottom > top)
+        return overlaps;
     }
 
     // --------------------------------------------------
@@ -456,11 +524,19 @@ if (typeof app.beginUndoGroup !== "function") {
     function getOrCreateLayer(layerName) {
         for (var i = 0; i < doc.layers.length; i++) {
             if (doc.layers[i].name === layerName) {
-                return doc.layers[i];
+                var layer = doc.layers[i];
+                if (layer.locked) {
+                    layer.locked = false; // Unlock the layer
+                }
+                if (!layer.visible) {
+                    layer.visible = true; // Make the layer visible
+                }
+                return layer;
             }
         }
         var newLayer = doc.layers.add();
         newLayer.name = layerName;
+        // New layers are not locked and visible by default, so no need to set here
         return newLayer;
     }
 
